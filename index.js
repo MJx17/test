@@ -6,6 +6,11 @@ const flowRoutes = require("./routes/flow");
 const app = express();
 app.use(express.json());
 
+// ✅ Hello World test route
+app.get("/", (req, res) => {
+  res.send("👋 Hello World from Node API!");
+});
+
 // Routes
 app.use("/flow", flowRoutes);
 
