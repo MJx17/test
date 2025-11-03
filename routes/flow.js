@@ -10,45 +10,7 @@ if (!FLOW_WEBHOOK_URL) {
     console.warn("[WARN] FLOW_WEBHOOK_URL is not set in environment variables.");
 }
 
-/** Helper: return ISO timestamp */
-const toISO = (date) => (date ? new Date(date).toISOString() : new Date().toISOString());
 
-/** Build Flow payload directly from DB document */
-function buildFlowPayload(doc) {
-    return {
-        request_uuid: doc.request_uuid,
-        requestor_fullname: doc.requestor_fullname,
-        system_name: doc.system_name,
-        type: doc.type,
-        reason: doc.reason,
-        requested_at: toISO(doc.request_timestamp || doc.createdAt),
-        source_system: doc.source_system || "default",
-    };
-}
-
-/** Extract messageId from Flow response */
-function extractMessageId(resp) {
-    const body = resp?.data;
-
-    if (!body) return null;
-
-    // If Flow returns a URL string
-    if (typeof body === "string") {
-        const match = body.match(/\/messages?\/([^\/]+)/);
-        return match ? match[1] : null;
-    }
-
-    // Most common Teams response patterns
-    return (
-        body?.id ||
-        body?.messageId ||
-        body?.message?.id ||
-        body?.outputs?.message?.id ||
-        body?.outputs?.body?.id ||
-        resp?.headers?.["x-ms-message-id"] ||
-        null
-    );
-}
 
 
 function buildFlowPayload(doc) {
@@ -184,43 +146,56 @@ router.post("/:uuid/:status", async(req, res) => {
 // app.use(express.json());
 
 router.post("/:uuid/teams-approval", async (req, res) => {
-    const { uuid } = req.params;
-    const { status, actor_name } = req.body;
+  const { uuid } = req.params;
+  let { status, actor_name } = req.body;
 
-    if (!status) return res.status(400).json({ error: "Missing status" });
+  console.log("[DEBUG] Incoming payload:", req.body);
 
-    try {
-        // Normalize all possible incoming values to DB enum
-        const normalized =
-            status === "approve" || status === "teams-approval" || status === "approved"
-                ? "approved"
-                : status === "decline" || status === "declined"
-                ? "declined"
-                : status; // fallback (should not happen)
+  // 1️⃣ Validate payload
+  if (typeof status !== "string" || !status.trim()) {
+    return res.status(400).json({ error: "Missing or invalid status" });
+  }
 
-        const doc = await Request.findOne({ request_uuid: uuid });
-        if (!doc) return res.status(404).json({ error: "Request not found" });
+  status = status.toLowerCase().trim();
+  if (!["approved", "declined"].includes(status)) {
+    return res.status(400).json({
+      error: "Invalid status. Must be 'approved' or 'declined'.",
+      received: status
+    });
+  }
 
-        if (doc.status !== "pending") {
-            return res.status(409).json({ error: `Request already ${doc.status}` });
+  try {
+    // 2️⃣ Update directly in DB (bypasses in-memory doc issues)
+    const updateResult = await Request.updateOne(
+      { request_uuid: uuid },
+      {
+        $set: {
+          status: status,
+          actor_name: actor_name?.trim() || "Teams User"
         }
+      }
+    );
 
-        doc.status = normalized;
-        doc.actor_name = actor_name || "Teams User";
-        await doc.save();
-
-        return res.status(200).json({
-            request_uuid: doc.request_uuid,
-            status: doc.status,
-            actor_name: doc.actor_name,
-            messageId: doc.messageId || null,
-            source_system: doc.source_system,
-            createdAt: doc.createdAt,
-        });
-    } catch (err) {
-        console.error("[ERROR] /flow/:uuid/teams-approval:", err.message);
-        return res.status(500).json({ error: "Approval update failed", message: err.message });
+    if (updateResult.matchedCount === 0) {
+      return res.status(404).json({ error: "Request not found" });
     }
+
+    // 3️⃣ Fetch the updated document to return
+    const updatedDoc = await Request.findOne({ request_uuid: uuid });
+
+    return res.status(200).json({
+      request_uuid: updatedDoc.request_uuid,
+      status: updatedDoc.status,
+      actor_name: updatedDoc.actor_name,
+      messageId: updatedDoc.messageId || null,
+      source_system: updatedDoc.source_system,
+      createdAt: updatedDoc.createdAt,
+    });
+
+  } catch (err) {
+    console.error("[ERROR] /flow/:uuid/teams-approval:", err);
+    return res.status(500).json({ error: "Teams approval error", message: err.message });
+  }
 });
 
 module.exports = router;

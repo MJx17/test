@@ -15,7 +15,7 @@ const RequestSchema = new mongoose.Schema({
     messageId: { type: String },
 
     // Workflow state
-    status: { type: String, default: "pending" },
+    status: { type: String,  default: "pending" },
     actor_name: { type: String },
 
     // Optional source marker
