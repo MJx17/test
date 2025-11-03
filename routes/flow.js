@@ -180,17 +180,23 @@ router.post("/:uuid/:status", async(req, res) => {
    TEAMS APPROVAL (wrapper)
    POST /flow/:uuid/teams-approval
 ======================================================= */
-router.post("/:uuid/teams-approval", async(req, res) => {
+// Ensure this is in place globally, before routes:
+// app.use(express.json());
+
+router.post("/:uuid/teams-approval", async (req, res) => {
     const { uuid } = req.params;
     const { status, actor_name } = req.body;
 
     if (!status) return res.status(400).json({ error: "Missing status" });
 
     try {
+        // Normalize all possible incoming values to DB enum
         const normalized =
-            status === "approve" ? "approved" :
-            status === "decline" ? "declined" :
-            status;
+            status === "approve" || status === "teams-approval" || status === "approved"
+                ? "approved"
+                : status === "decline" || status === "declined"
+                ? "declined"
+                : status; // fallback (should not happen)
 
         const doc = await Request.findOne({ request_uuid: uuid });
         if (!doc) return res.status(404).json({ error: "Request not found" });
@@ -213,7 +219,7 @@ router.post("/:uuid/teams-approval", async(req, res) => {
         });
     } catch (err) {
         console.error("[ERROR] /flow/:uuid/teams-approval:", err.message);
-        return res.status(500).json({ error: "Teams approval error", message: err.message });
+        return res.status(500).json({ error: "Approval update failed", message: err.message });
     }
 });
 
