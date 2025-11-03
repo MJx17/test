@@ -28,34 +28,53 @@ function buildFlowPayload(doc) {
 
 /** Extract messageId from Flow response */
 function extractMessageId(resp) {
-    const body = resp?.data || {};
+    const body = resp?.data;
+
+    if (!body) return null;
+
+    // If Flow returns a URL string
+    if (typeof body === "string") {
+        const match = body.match(/\/messages?\/([^\/]+)/);
+        return match ? match[1] : null;
+    }
+
+    // Most common Teams response patterns
     return (
-        body.messageId ||
-        body.id ||
-        body?.outputs?.messageId ||
+        body?.id ||
+        body?.messageId ||
+        body?.message?.id ||
+        body?.outputs?.message?.id ||
+        body?.outputs?.body?.id ||
         resp?.headers?.["x-ms-message-id"] ||
         null
     );
 }
 
 
+function buildFlowPayload(doc) {
+    return {
+        request_uuid: doc.request_uuid,
+        requestor_fullname: doc.requestor_fullname,
+        system_name: doc.system_name,
+        type: doc.type,
+        reason: doc.reason,
+        request_timestamp: doc.request_timestamp,
+        source_system: doc.source_system || "default",
+        messageId: doc.messageId || null
+    };
+}
 
-/* =======================================================
-   CREATE + FORWARD
-   POST /flow
-======================================================= */
-router.post("/", async(req, res) => {
+
+router.post("/", async (req, res) => {
     try {
         const { requestor_fullname, system_name, type, reason, request_timestamp, source_system } = req.body;
 
-        // ✅ Validation
         if (!requestor_fullname || !system_name || !type || !reason) {
             return res.status(400).json({
                 error: "Missing required fields: requestor_fullname, system_name, type, reason",
             });
         }
 
-        // ✅ Create record (timestamps auto-managed)
         const doc = await Request.create({
             request_uuid: uuidv4(),
             requestor_fullname,
@@ -63,7 +82,7 @@ router.post("/", async(req, res) => {
             type,
             reason,
             request_timestamp,
-            source_system, // default handled by schema if undefined
+            source_system
         });
 
         const payload = buildFlowPayload(doc);
@@ -72,13 +91,6 @@ router.post("/", async(req, res) => {
             headers: { "Content-Type": "application/json" },
         });
 
-        const ok = resp.status >= 200 && resp.status < 300;
-        if (!ok) {
-            console.error("[ERROR] Flow webhook failed", { status: resp.status, data: resp.data });
-            return res.status(502).json({ error: "Flow webhook failed", status: resp.status, data: resp.data });
-        }
-
-        // ✅ Save messageId if available
         const messageId = extractMessageId(resp);
         if (messageId) {
             doc.messageId = messageId;
@@ -86,29 +98,22 @@ router.post("/", async(req, res) => {
         }
 
         return res.status(201).json({
-            request: {
-                uuid: doc.request_uuid,
-                status: doc.status,
-                messageId: doc.messageId || null,
-                source_system: doc.source_system,
-                createdAt: doc.createdAt,
-            },
-            flow_response: resp.data || {},
+            uuid: doc.request_uuid,
+            status: doc.status,
+            messageId: doc.messageId || null,
+            createdAt: doc.createdAt
         });
+
     } catch (err) {
         console.error("[ERROR] /flow create+forward:", err.message);
         return res.status(500).json({ error: "Failed to create & forward request", message: err.message });
     }
 });
 
-/* =======================================================
-   FORWARD BY UUID
-   POST /flow/:uuid/forward
-======================================================= */
-router.post("/:uuid/forward", async(req, res) => {
-    const { uuid } = req.params;
 
+router.post("/:uuid/forward", async (req, res) => {
     try {
+        const { uuid } = req.params;
         const doc = await Request.findOne({ request_uuid: uuid });
         if (!doc) return res.status(404).json({ error: "Request not found", uuid });
 
@@ -118,12 +123,6 @@ router.post("/:uuid/forward", async(req, res) => {
             headers: { "Content-Type": "application/json" },
         });
 
-        const ok = resp.status >= 200 && resp.status < 300;
-        if (!ok) {
-            console.error("[ERROR] Flow webhook failed", { status: resp.status, data: resp.data });
-            return res.status(502).json({ error: "Flow webhook failed", status: resp.status, data: resp.data });
-        }
-
         const messageId = extractMessageId(resp);
         if (messageId) {
             doc.messageId = messageId;
@@ -131,11 +130,10 @@ router.post("/:uuid/forward", async(req, res) => {
         }
 
         return res.status(200).json({
-            request_uuid: doc.request_uuid,
-            messageId: doc.messageId || null,
-            source_system: doc.source_system,
-            flow_response: resp.data || {},
+            uuid: doc.request_uuid,
+            messageId: doc.messageId || null
         });
+
     } catch (err) {
         console.error("[ERROR] /flow/:uuid/forward:", err.message);
         return res.status(500).json({ error: "Flow HTTP request error", message: err.message });
