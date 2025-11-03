@@ -82,7 +82,7 @@ router.post("/", async (req, res) => {
             type,
             reason,
             request_timestamp,
-            source_system
+            source_system,
         });
 
         const payload = buildFlowPayload(doc);
@@ -91,29 +91,29 @@ router.post("/", async (req, res) => {
             headers: { "Content-Type": "application/json" },
         });
 
-        const messageId = extractMessageId(resp);
-        if (messageId) {
-            doc.messageId = messageId;
-            await doc.save();
-        }
+        // Store the Flow response directly as messageId
+        doc.messageId = resp.data?.toString();
+        await doc.save();
 
         return res.status(201).json({
-            uuid: doc.request_uuid,
-            status: doc.status,
-            messageId: doc.messageId || null,
-            createdAt: doc.createdAt
+            request: {
+                uuid: doc.request_uuid,
+                status: doc.status,
+                messageId: doc.messageId,
+                source_system: doc.source_system,
+                createdAt: doc.createdAt,
+            }
         });
-
     } catch (err) {
         console.error("[ERROR] /flow create+forward:", err.message);
         return res.status(500).json({ error: "Failed to create & forward request", message: err.message });
     }
 });
 
-
 router.post("/:uuid/forward", async (req, res) => {
+    const { uuid } = req.params;
+
     try {
-        const { uuid } = req.params;
         const doc = await Request.findOne({ request_uuid: uuid });
         if (!doc) return res.status(404).json({ error: "Request not found", uuid });
 
@@ -123,17 +123,15 @@ router.post("/:uuid/forward", async (req, res) => {
             headers: { "Content-Type": "application/json" },
         });
 
-        const messageId = extractMessageId(resp);
-        if (messageId) {
-            doc.messageId = messageId;
-            await doc.save();
-        }
+        // Store the Flow response directly as messageId
+        doc.messageId = resp.data?.toString();
+        await doc.save();
 
         return res.status(200).json({
-            uuid: doc.request_uuid,
-            messageId: doc.messageId || null
+            request_uuid: doc.request_uuid,
+            messageId: doc.messageId,
+            source_system: doc.source_system
         });
-
     } catch (err) {
         console.error("[ERROR] /flow/:uuid/forward:", err.message);
         return res.status(500).json({ error: "Flow HTTP request error", message: err.message });
