@@ -22,7 +22,7 @@ function buildFlowPayload(doc) {
         reason: doc.reason,
         request_timestamp: doc.request_timestamp,
         source_system: doc.source_system || "default",
-        messageId: doc.messageId || null
+        // messageId: doc.messageId || null
     };
 }
 
@@ -54,16 +54,16 @@ router.post("/", async (req, res) => {
         });
 
         // Store both messageId and conversationId
-        doc.messageId = resp.data?.messageId?.toString() || resp.data?.toString();
-        doc.conversationId = resp.data?.conversationId?.toString();
-        await doc.save();
+        // doc.messageId = resp.data?.messageId?.toString() || resp.data?.toString();
+        // doc.conversationId = resp.data?.conversationId?.toString();
+        // await doc.save();
 
         return res.status(201).json({
             request: {
                 uuid: doc.request_uuid,
                 status: doc.status,
-                messageId: doc.messageId,
-                conversationId: doc.conversationId,
+                // messageId: doc.messageId,
+                // conversationId: doc.conversationId,
                 source_system: doc.source_system,
                 createdAt: doc.createdAt,
             }
