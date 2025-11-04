@@ -12,6 +12,7 @@ const RequestSchema = new mongoose.Schema({
     request_timestamp: { type: Date },
 
     // Teams / Flow outputs
+    conversationId: { type: String },
     messageId: { type: String },
 
     // Workflow state

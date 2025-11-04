@@ -53,8 +53,9 @@ router.post("/", async (req, res) => {
             headers: { "Content-Type": "application/json" },
         });
 
-        // Store the Flow response directly as messageId
-        doc.messageId = resp.data?.toString();
+        // Store both messageId and conversationId
+        doc.messageId = resp.data?.messageId?.toString() || resp.data?.toString();
+        doc.conversationId = resp.data?.conversationId?.toString();
         await doc.save();
 
         return res.status(201).json({
@@ -62,6 +63,7 @@ router.post("/", async (req, res) => {
                 uuid: doc.request_uuid,
                 status: doc.status,
                 messageId: doc.messageId,
+                conversationId: doc.conversationId,
                 source_system: doc.source_system,
                 createdAt: doc.createdAt,
             }
@@ -72,33 +74,37 @@ router.post("/", async (req, res) => {
     }
 });
 
-router.post("/:uuid/forward", async (req, res) => {
-    const { uuid } = req.params;
+// 
+// router.post("/:uuid/forward", async (req, res) => {
+//     const { uuid } = req.params;
 
-    try {
-        const doc = await Request.findOne({ request_uuid: uuid });
-        if (!doc) return res.status(404).json({ error: "Request not found", uuid });
+//     try {
+//         const doc = await Request.findOne({ request_uuid: uuid });
+//         if (!doc) return res.status(404).json({ error: "Request not found", uuid });
 
-        const payload = buildFlowPayload(doc);
-        const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
-            timeout: 15000,
-            headers: { "Content-Type": "application/json" },
-        });
+//         const payload = buildFlowPayload(doc);
+//         const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
+//             timeout: 15000,
+//             headers: { "Content-Type": "application/json" },
+//         });
 
-        // Store the Flow response directly as messageId
-        doc.messageId = resp.data?.toString();
-        await doc.save();
+//         // Store both messageId and conversationId
+//         doc.messageId = resp.data?.messageId?.toString() || resp.data?.toString();
+//         doc.conversationId = resp.data?.conversationId?.toString();
+//         await doc.save();
 
-        return res.status(200).json({
-            request_uuid: doc.request_uuid,
-            messageId: doc.messageId,
-            source_system: doc.source_system
-        });
-    } catch (err) {
-        console.error("[ERROR] /flow/:uuid/forward:", err.message);
-        return res.status(500).json({ error: "Flow HTTP request error", message: err.message });
-    }
-});
+//         return res.status(200).json({
+//             request_uuid: doc.request_uuid,
+//             messageId: doc.messageId,
+//             conversationId: doc.conversationId,
+//             source_system: doc.source_system
+//         });
+//     } catch (err) {
+//         console.error("[ERROR] /flow/:uuid/forward:", err.message);
+//         return res.status(500).json({ error: "Flow HTTP request error", message: err.message });
+//     }
+// });
+
 
 /* =======================================================
    APPROVAL (manual or via API)
