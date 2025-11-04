@@ -48,28 +48,15 @@ router.post("/", async (req, res) => {
         });
 
         const payload = buildFlowPayload(doc);
-
         await axios.post(FLOW_WEBHOOK_URL, payload, {
             timeout: 15000,
             headers: { "Content-Type": "application/json" },
         });
 
-        // const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
-        //     timeout: 15000,
-        //     headers: { "Content-Type": "application/json" },
-        // });
-
-        // Store both messageId and conversationId
-        // doc.messageId = resp.data?.messageId?.toString() || resp.data?.toString();
-        // doc.conversationId = resp.data?.conversationId?.toString();
-        // await doc.save();
-
         return res.status(201).json({
             request: {
                 uuid: doc.request_uuid,
                 status: doc.status,
-                // messageId: doc.messageId,
-                // conversationId: doc.conversationId,
                 source_system: doc.source_system,
                 createdAt: doc.createdAt,
             }
@@ -80,13 +67,26 @@ router.post("/", async (req, res) => {
     }
 });
 
-// 
-// router.post("/:uuid/forward", async (req, res) => {
-//     const { uuid } = req.params;
 
+// router.post("/", async (req, res) => {
 //     try {
-//         const doc = await Request.findOne({ request_uuid: uuid });
-//         if (!doc) return res.status(404).json({ error: "Request not found", uuid });
+//         const { requestor_fullname, system_name, type, reason, request_timestamp, source_system } = req.body;
+
+//         if (!requestor_fullname || !system_name || !type || !reason) {
+//             return res.status(400).json({
+//                 error: "Missing required fields: requestor_fullname, system_name, type, reason",
+//             });
+//         }
+
+//         const doc = await Request.create({
+//             request_uuid: uuidv4(),
+//             requestor_fullname,
+//             system_name,
+//             type,
+//             reason,
+//             request_timestamp,
+//             source_system,
+//         });
 
 //         const payload = buildFlowPayload(doc);
 //         const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
@@ -99,31 +99,66 @@ router.post("/", async (req, res) => {
 //         doc.conversationId = resp.data?.conversationId?.toString();
 //         await doc.save();
 
-//         return res.status(200).json({
-//             request_uuid: doc.request_uuid,
-//             messageId: doc.messageId,
-//             conversationId: doc.conversationId,
-//             source_system: doc.source_system
+//         return res.status(201).json({
+//             request: {
+//                 uuid: doc.request_uuid,
+//                 status: doc.status,
+//                 messageId: doc.messageId,
+//                 conversationId: doc.conversationId,
+//                 source_system: doc.source_system,
+//                 createdAt: doc.createdAt,
+//             }
 //         });
 //     } catch (err) {
-//         console.error("[ERROR] /flow/:uuid/forward:", err.message);
-//         return res.status(500).json({ error: "Flow HTTP request error", message: err.message });
+//         console.error("[ERROR] /flow create+forward:", err.message);
+//         return res.status(500).json({ error: "Failed to create & forward request", message: err.message });
 //     }
 // });
+
+// 
+router.post("/:uuid/forward", async (req, res) => {
+    const { uuid } = req.params;
+
+    try {
+        const doc = await Request.findOne({ request_uuid: uuid });
+        if (!doc) return res.status(404).json({ error: "Request not found", uuid });
+
+        const payload = buildFlowPayload(doc);
+        const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
+            timeout: 15000,
+            headers: { "Content-Type": "application/json" },
+        });
+
+        // Store both messageId and conversationId
+        doc.messageId = resp.data?.messageId?.toString() || resp.data?.toString();
+        doc.conversationId = resp.data?.conversationId?.toString();
+        await doc.save();
+
+        return res.status(200).json({
+            request_uuid: doc.request_uuid,
+            messageId: doc.messageId,
+            conversationId: doc.conversationId,
+            source_system: doc.source_system
+        });
+    } catch (err) {
+        console.error("[ERROR] /flow/:uuid/forward:", err.message);
+        return res.status(500).json({ error: "Flow HTTP request error", message: err.message });
+    }
+});
 
 
 /* =======================================================
    APPROVAL (manual or via API)
    POST /flow/:uuid/:status
 ======================================================= */
-router.post("/:uuid/:status", async (req, res) => {
+router.post("/:uuid/:status", async(req, res) => {
     const { uuid, status } = req.params;
 
     try {
         const normalized =
             status === "approve" ? "approved" :
-                status === "decline" ? "declined" :
-                    status;
+            status === "decline" ? "declined" :
+            status;
 
         const doc = await Request.findOne({ request_uuid: uuid });
         if (!doc) return res.status(404).json({ error: "Request not found" });
@@ -158,56 +193,56 @@ router.post("/:uuid/:status", async (req, res) => {
 // app.use(express.json());
 
 router.post("/:uuid/teams-approval", async (req, res) => {
-    const { uuid } = req.params;
-    let { status, actor_name } = req.body;
+  const { uuid } = req.params;
+  let { status, actor_name } = req.body;
 
-    console.log("[DEBUG] Incoming payload:", req.body);
+  console.log("[DEBUG] Incoming payload:", req.body);
 
-    // 1️⃣ Validate payload
-    if (typeof status !== "string" || !status.trim()) {
-        return res.status(400).json({ error: "Missing or invalid status" });
-    }
+  // 1️⃣ Validate payload
+  if (typeof status !== "string" || !status.trim()) {
+    return res.status(400).json({ error: "Missing or invalid status" });
+  }
 
-    status = status.toLowerCase().trim();
-    if (!["approved", "declined"].includes(status)) {
-        return res.status(400).json({
-            error: "Invalid status. Must be 'approved' or 'declined'.",
-            received: status
-        });
-    }
+  status = status.toLowerCase().trim();
+  if (!["approved", "declined"].includes(status)) {
+    return res.status(400).json({
+      error: "Invalid status. Must be 'approved' or 'declined'.",
+      received: status
+    });
+  }
 
-    try {
-        // 2️⃣ Update directly in DB (bypasses in-memory doc issues)
-        const updateResult = await Request.updateOne(
-            { request_uuid: uuid },
-            {
-                $set: {
-                    status: status,
-                    actor_name: actor_name?.trim() || "Teams User"
-                }
-            }
-        );
-
-        if (updateResult.matchedCount === 0) {
-            return res.status(404).json({ error: "Request not found" });
+  try {
+    // 2️⃣ Update directly in DB (bypasses in-memory doc issues)
+    const updateResult = await Request.updateOne(
+      { request_uuid: uuid },
+      {
+        $set: {
+          status: status,
+          actor_name: actor_name?.trim() || "Teams User"
         }
+      }
+    );
 
-        // 3️⃣ Fetch the updated document to return
-        const updatedDoc = await Request.findOne({ request_uuid: uuid });
-
-        return res.status(200).json({
-            request_uuid: updatedDoc.request_uuid,
-            status: updatedDoc.status,
-            actor_name: updatedDoc.actor_name,
-            messageId: updatedDoc.messageId || null,
-            source_system: updatedDoc.source_system,
-            createdAt: updatedDoc.createdAt,
-        });
-
-    } catch (err) {
-        console.error("[ERROR] /flow/:uuid/teams-approval:", err);
-        return res.status(500).json({ error: "Teams approval error", message: err.message });
+    if (updateResult.matchedCount === 0) {
+      return res.status(404).json({ error: "Request not found" });
     }
+
+    // 3️⃣ Fetch the updated document to return
+    const updatedDoc = await Request.findOne({ request_uuid: uuid });
+
+    return res.status(200).json({
+      request_uuid: updatedDoc.request_uuid,
+      status: updatedDoc.status,
+      actor_name: updatedDoc.actor_name,
+      messageId: updatedDoc.messageId || null,
+      source_system: updatedDoc.source_system,
+      createdAt: updatedDoc.createdAt,
+    });
+
+  } catch (err) {
+    console.error("[ERROR] /flow/:uuid/teams-approval:", err);
+    return res.status(500).json({ error: "Teams approval error", message: err.message });
+  }
 });
 
 module.exports = router;
