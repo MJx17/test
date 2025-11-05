@@ -1,7 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
-const Request = require("../models/Request"); // adjust path to your model
+const Request = require("../models/request"); // adjust path to your model
 
 const router = express.Router();
 const FLOW_WEBHOOK_URL = process.env.FLOW_WEBHOOK_URL;
