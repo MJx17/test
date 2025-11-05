@@ -12,21 +12,6 @@ if (!FLOW_WEBHOOK_URL) {
 
 
 
-
-function buildFlowPayload(doc) {
-    return {
-        request_uuid: doc.request_uuid,
-        requestor_fullname: doc.requestor_fullname,
-        system_name: doc.system_name,
-        type: doc.type,
-        reason: doc.reason,
-        request_timestamp: doc.request_timestamp,
-        source_system: doc.source_system || "default",
-        // messageId: doc.messageId || null
-    };
-}
-
-
 // router.post("/", async (req, res) => {
 //     try {
 //         const { requestor_fullname, system_name, type, reason, request_timestamp, source_system } = req.body;
@@ -73,10 +58,20 @@ function buildFlowPayload(doc) {
    CREATE + FORWARD
    POST /flow/
 ======================================================= */
+// route.ts
+
 router.post("/", async (req, res) => {
   try {
-    const { requestor_fullname, system_name, type, reason, request_timestamp, source_system } = req.body;
+    const {
+      requestor_fullname,
+      system_name,
+      type,
+      reason,
+      request_timestamp,
+      source_system
+    } = req.body;
 
+    // Validate required fields
     if (!requestor_fullname || !system_name || !type || !reason) {
       return res.status(400).json({
         error: "Missing required fields: requestor_fullname, system_name, type, reason"
@@ -85,17 +80,31 @@ router.post("/", async (req, res) => {
 
     const request_uuid = uuidv4();
 
+    // Create DB record first
     const newRequest = await Request.create({
       request_uuid,
       requestor_fullname,
       system_name,
       type,
       reason,
-      request_timestamp,
+      request_timestamp: request_timestamp ?? new Date().toISOString(),
       source_system
     });
 
-    const payload = buildFlowPayload(newRequest);
+    // ✅ Inline payload construction
+    const payload = {
+      id: newRequest.request_uuid,
+      requester: { name: newRequest.requestor_fullname.trim() },
+      system: newRequest.system_name.trim(),
+      type: newRequest.type.trim(),
+      reason: newRequest.reason.trim(),
+      timestamp: newRequest.request_timestamp,
+      source: newRequest.source_system ?? "unknown",
+      version: "v1",
+      correlationId: newRequest.request_uuid
+    };
+
+    // Send to Flow webhook
     const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
       timeout: 15000,
       headers: { "Content-Type": "application/json" }
@@ -104,9 +113,10 @@ router.post("/", async (req, res) => {
     const messageId = resp.data?.activityId?.toString();
     const conversationId = resp.data?.conversationId?.toString();
 
+    // Update DB with response IDs
     await Request.updateOne(
       { request_uuid },
-      { $set: { messageId, conversationId } }
+      { $set: { messageId, conversationId, status: "forwarded" } }
     );
 
     const updated = await Request.findOne({ request_uuid }).lean();
@@ -123,46 +133,50 @@ router.post("/", async (req, res) => {
     });
   } catch (err) {
     console.error("[ERROR] /flow create+forward:", err.message);
-    res.status(500).json({ error: "Failed to create & forward request", message: err.message });
+    res.status(500).json({
+      error: "Failed to create & forward request",
+      message: err.message
+    });
   }
 });
+
 
 /* =======================================================
    FORWARD EXISTING
    POST /flow/:uuid/forward
 ======================================================= */
-router.post("/:uuid/forward", async (req, res) => {
-  const { uuid } = req.params;
+// router.post("/:uuid/forward", async (req, res) => {
+//   const { uuid } = req.params;
 
-  try {
-    const request = await Request.findOne({ request_uuid: uuid }).lean();
-    if (!request) return res.status(404).json({ error: "Request not found", uuid });
+//   try {
+//     const request = await Request.findOne({ request_uuid: uuid }).lean();
+//     if (!request) return res.status(404).json({ error: "Request not found", uuid });
 
-    const payload = buildFlowPayload(request);
-    const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
-      timeout: 15000,
-      headers: { "Content-Type": "application/json" }
-    });
+//     const payload = buildFlowPayload(request);
+//     const resp = await axios.post(FLOW_WEBHOOK_URL, payload, {
+//       timeout: 15000,
+//       headers: { "Content-Type": "application/json" }
+//     });
 
-    const messageId = resp.data?.activityId?.toString();
-    const conversationId = resp.data?.conversationId?.toString();
+//     const messageId = resp.data?.activityId?.toString();
+//     const conversationId = resp.data?.conversationId?.toString();
 
-    await Request.updateOne(
-      { request_uuid: uuid },
-      { $set: { messageId, conversationId } }
-    );
+//     await Request.updateOne(
+//       { request_uuid: uuid },
+//       { $set: { messageId, conversationId } }
+//     );
 
-    res.status(200).json({
-      request_uuid: uuid,
-      messageId,
-      conversationId,
-      source_system: request.source_system
-    });
-  } catch (err) {
-    console.error("[ERROR] /flow/:uuid/forward:", err.message);
-    res.status(500).json({ error: "Flow forwarding error", message: err.message });
-  }
-});
+//     res.status(200).json({
+//       request_uuid: uuid,
+//       messageId,
+//       conversationId,
+//       source_system: request.source_system
+//     });
+//   } catch (err) {
+//     console.error("[ERROR] /flow/:uuid/forward:", err.message);
+//     res.status(500).json({ error: "Flow forwarding error", message: err.message });
+//   }
+// });
 
 /* =======================================================
    APPROVAL VIA URI
